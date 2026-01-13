@@ -1,6 +1,4 @@
-// content.js - Fixed "Flickering" Issue
-
-console.log("Raksha-AI: Extension Loaded! (Sticky Mode)");
+console.log("Raksha-AI: Extension Loaded! (Restore Mode)");
 
 // --- 1. UI Setup ---
 const container = document.createElement("div");
@@ -25,19 +23,24 @@ badge.style.fontWeight = "bold";
 badge.style.transition = "background-color 0.2s ease"; 
 container.appendChild(badge);
 
-const cleanBtn = document.createElement("button");
-cleanBtn.innerText = "✨ Clean Data";
-cleanBtn.style.backgroundColor = "#e74c3c";
-cleanBtn.style.color = "white";
-cleanBtn.style.border = "none";
-cleanBtn.style.padding = "8px 15px";
-cleanBtn.style.borderRadius = "20px";
-cleanBtn.style.cursor = "pointer";
-cleanBtn.style.fontWeight = "bold";
-cleanBtn.style.display = "none"; 
-container.appendChild(cleanBtn);
+// The Button (Now acts as a Toggle)
+const actionBtn = document.createElement("button");
+actionBtn.innerText = "✨ Clean Data";
+actionBtn.style.backgroundColor = "#e74c3c"; // Start Red
+actionBtn.style.color = "white";
+actionBtn.style.border = "none";
+actionBtn.style.padding = "8px 15px";
+actionBtn.style.borderRadius = "20px";
+actionBtn.style.cursor = "pointer";
+actionBtn.style.fontWeight = "bold";
+actionBtn.style.display = "none"; 
+container.appendChild(actionBtn);
 
-// --- 2. Configuration ---
+// --- 2. Memory & Config ---
+let originalTextCache = ""; // THE VAULT: Stores the real data
+let isCleanedState = false; // Tracks if we are currently "Cleaned" or "Dirty"
+let isProcessing = false;   // Prevents bugs during the swap
+
 const SAFE_DATA = {
     phone: "0000000000",
     email: "protected@user.com",
@@ -51,10 +54,8 @@ const patterns = {
 };
 
 // --- 3. The Polling Loop ---
-let isCleaning = false;
-
 setInterval(() => {
-    if (isCleaning) return;
+    if (isProcessing) return; // Don't scan while swapping text
 
     const textBox = document.querySelector('#prompt-textarea') || 
                     document.querySelector('[contenteditable="true"]');
@@ -62,31 +63,26 @@ setInterval(() => {
     if (textBox) {
         scanText(textBox);
     }
-}, 500); // Faster check (0.5s) for better responsiveness
+}, 500);
 
-// --- 4. Scanning Logic (THE FIX) ---
+// --- 4. Scanning Logic ---
 function scanText(element) {
     const text = element.innerText || ""; 
-    let warningFound = false;
+    
+    // If we are in "Cleaned State", we don't need to scan for risks
+    // We just wait for the user to click Restore
+    if (isCleanedState) {
+        return; 
+    }
 
-    // CRITICAL FIX: Reset the "lastIndex" of regexes before testing
-    // This stops the Red/Green toggling
+    let warningFound = false;
     patterns.indianPhone.lastIndex = 0;
     patterns.email.lastIndex = 0;
     patterns.panCard.lastIndex = 0;
 
-    // Check 1: Phone
-    if (patterns.indianPhone.test(text) && !text.includes(SAFE_DATA.phone)) {
-        warningFound = true;
-    }
-    
-    // Check 2: Email
-    if (patterns.email.test(text) && !text.includes(SAFE_DATA.email)) {
-        warningFound = true;
-    }
-
-    // Check 3: PAN
-    if (patterns.panCard.test(text) && !text.includes(SAFE_DATA.pan)) {
+    if ((patterns.indianPhone.test(text) && !text.includes(SAFE_DATA.phone)) ||
+        (patterns.email.test(text) && !text.includes(SAFE_DATA.email)) ||
+        (patterns.panCard.test(text) && !text.includes(SAFE_DATA.pan))) {
         warningFound = true;
     }
 
@@ -95,22 +91,27 @@ function scanText(element) {
 
 // --- 5. UI Update ---
 function updateUI(element, isRisk) {
-    if (isRisk) {
-        // Only update if it's not already Red (Prevents jitter)
+    // Scenario 1: Risk Found (Show "Clean" Button)
+    if (isRisk && !isCleanedState) {
         if (badge.innerText !== "⚠️ Privacy Risk!") {
             badge.innerText = "⚠️ Privacy Risk!";
-            badge.style.backgroundColor = "#e74c3c"; 
-            cleanBtn.style.display = "block";
+            badge.style.backgroundColor = "#e74c3c"; // Red
+            
+            actionBtn.innerText = "✨ Clean Data";
+            actionBtn.style.backgroundColor = "#e74c3c"; // Red Button
+            actionBtn.style.display = "block";
             
             element.style.border = "2px solid red";
             element.style.backgroundColor = "rgba(255, 0, 0, 0.05)";
         }
-    } else {
-        // Only update if it's not already Green
+    } 
+    // Scenario 2: Safe (Hide Button)
+    else if (!isRisk && !isCleanedState) {
         if (badge.innerText !== "🛡️ Raksha Safe") {
             badge.innerText = "🛡️ Raksha Safe";
-            badge.style.backgroundColor = "#2ecc71"; 
-            cleanBtn.style.display = "none";
+            badge.style.backgroundColor = "#2ecc71"; // Green
+            
+            actionBtn.style.display = "none";
             
             element.style.border = "none";
             element.style.backgroundColor = "transparent";
@@ -118,31 +119,68 @@ function updateUI(element, isRisk) {
     }
 }
 
-// --- 6. Cleaning Logic ---
-cleanBtn.addEventListener("click", () => {
+// --- 6. The Toggle Logic (Clean <-> Restore) ---
+actionBtn.addEventListener("click", () => {
     const textBox = document.querySelector('#prompt-textarea') || 
                     document.querySelector('[contenteditable="true"]');
     
     if (!textBox) return;
 
-    isCleaning = true; // Lock scanning
+    isProcessing = true; // Pause scanning
 
-    let text = textBox.innerText; 
+    if (!isCleanedState) {
+        // --- OPERATION: CLEAN ---
+        console.log("Cleaning data...");
+        
+        // 1. Save Original to Vault
+        originalTextCache = textBox.innerText; 
+        
+        // 2. Replace with Fakes
+        let text = textBox.innerText;
+        text = text.replace(patterns.indianPhone, SAFE_DATA.phone);
+        text = text.replace(patterns.email, SAFE_DATA.email);
+        text = text.replace(patterns.panCard, SAFE_DATA.pan);
+        
+        // 3. Update DOM
+        textBox.innerText = text;
+        
+        // 4. Update State & Button
+        isCleanedState = true;
+        
+        badge.innerText = "🔒 Secure Mode";
+        badge.style.backgroundColor = "#3498db"; // Blue
+        
+        actionBtn.innerText = "↩️ Restore Original";
+        actionBtn.style.backgroundColor = "#3498db"; // Blue Button
+        
+        // Remove Red Warnings
+        textBox.style.border = "2px solid #3498db"; // Blue Border
+        textBox.style.backgroundColor = "rgba(52, 152, 219, 0.05)";
 
-    // We can safely use replace here because the regexes are global
-    text = text.replace(patterns.indianPhone, SAFE_DATA.phone);
-    text = text.replace(patterns.email, SAFE_DATA.email);
-    text = text.replace(patterns.panCard, SAFE_DATA.pan);
+    } else {
+        // --- OPERATION: RESTORE ---
+        console.log("Restoring data...");
+        
+        // 1. Retrieve from Vault
+        if (originalTextCache) {
+            textBox.innerText = originalTextCache;
+        }
+        
+        // 2. Reset State
+        isCleanedState = false;
+        originalTextCache = ""; // Clear memory
+        
+        // 3. UI will automatically update on next scan (Red Badge will come back)
+    }
 
-    textBox.innerText = text;
-    
+    // Trigger Input Event (So React knows text changed)
     const event = new Event('input', { bubbles: true });
     textBox.dispatchEvent(event);
 
-    // Wait a moment before unlocking, to let the UI settle
+    // Resume scanning after small delay
     setTimeout(() => {
-        isCleaning = false;
-        // Force an immediate re-scan to turn the badge Green instantly
-        scanText(textBox); 
+        isProcessing = false;
+        // If we just restored, force a scan immediately to show the Red Warning again
+        if (!isCleanedState) scanText(textBox);
     }, 200);
 });
